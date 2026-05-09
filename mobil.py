@@ -34,29 +34,34 @@ if not st.session_state['login']:
     st.title("🔐 Şoför Giriş Paneli")
     
     try:
-        # Araçları ve şifrelerini çekiyoruz
+        # Araç listesini çek
         araclar_data = list(db["Araclar"].find({}, {"plaka": 1, "sifre": 1}))
         plakalar = [a["plaka"] for a in araclar_data]
     except:
-        plakalar = ["Hata: Araçlar Yüklenemedi"]
+        plakalar = ["Hata: Veritabanına ulaşılamadı"]
 
     secili_plaka = st.selectbox("Aracınızı Seçin", plakalar)
     girilen_sifre = st.text_input("Giriş Şifresi", type="password")
     
     if st.button("SİSTEME GİRİŞ YAP"):
-        # Seçilen aracın veritabanındaki şifresini bul
+        # Seçilen aracı bul
         hedef_arac = next((a for a in araclar_data if a["plaka"] == secili_plaka), None)
         
-        # PC'den belirlediğin şifre kontrolü
-        if hedef_arac and str(hedef_arac.get("sifre")) == girilen_sifre:
-            st.session_state['login'] = True
-            st.session_state['plaka'] = secili_plaka
-            st.rerun()
+        if hedef_arac:
+            # KRİTİK GÜNCELLEME: Hem veritabanındaki hem girilen şifreyi string (metin) yapıp karşılaştırıyoruz
+            db_sifre = str(hedef_arac.get("sifre", "")).strip()
+            # Eğer PC'de şifre boşsa veya girilenle eşleşiyorsa
+            if db_sifre == str(girilen_sifre).strip():
+                st.session_state['login'] = True
+                st.session_state['plaka'] = secili_plaka
+                st.rerun()
+            else:
+                st.error(f"Hatalı Şifre! (PC'deki kayıtlı şifre ile eşleşmiyor)")
         else:
-            st.error("Hatalı Şifre! Lütfen PC'de belirlediğiniz şifreyi girin.")
+            st.error("Araç bilgisi bulunamadı.")
 
 else:
-    # --- 4. ANA PANEL (Giriş Başarılı) ---
+    # --- 4. ANA PANEL ---
     st.title(f"🚛 {st.session_state['plaka']}")
     
     tab1, tab2, tab3 = st.tabs(["📍 KM GİRİŞİ", "⛽ YAKIT ALIMI", "💰 MASRAF YAZ"])
@@ -64,13 +69,15 @@ else:
 
     with tab1:
         st.subheader("Sefer Kilometre Takibi")
+        # Masaüstüyle uyumlu plaka formatı (Boşluksuz arama)
+        temiz_plaka = plaka.replace(" ", "").upper()
         aktif_sefer = db["Seferler"].find_one({
-            "plaka": {"$regex": plaka.replace(" ", ""), "$options": "i"},
+            "plaka": {"$regex": temiz_plaka, "$options": "i"},
             "durum": "BEKLEMEDE" 
         }, sort=[("kayit_tarihi", -1)])
         
         if aktif_sefer:
-            st.success(f"✅ Güzergah: {aktif_sefer.get('guzergah_detay', 'Bilinmiyor')}")
+            st.info(f"✅ Güzergah: {aktif_sefer.get('guzergah_detay', 'Bilinmiyor')}")
             c_km = st.number_input("Depo Çıkış KM", value=0.0)
             d_km = st.number_input("Dönüş KM (Sefer Sonu)", value=0.0)
             
@@ -80,23 +87,26 @@ else:
                     {"_id": aktif_sefer["_id"]},
                     {"$set": {"depo_cikis_km": c_km, "donus_km": d_km, "fiili_km": fiili, "durum": "TAMAMLANDI"}}
                 )
-                st.success("Sefer bilgileri güncellendi.")
+                st.success("Bilgiler başarıyla kaydedildi.")
         else:
-            st.warning("Aktif bir sefer bulunamadı.")
+            st.warning("Beklemede olan bir sefer bulunamadı.")
 
     with tab2:
         st.subheader("Yakıt Alım Girişi")
-        # Litre ve Birim Fiyat ile Otomatik Toplam Tutar
-        yakit_lt = st.number_input("Kaç Litre Alındı?", min_value=0.0, step=0.1)
-        birim_fiyat = st.number_input("Litre Fiyatı (TL)", min_value=0.0, step=0.1)
+        # OTOMATİK HESAPLAMA SİSTEMİ
+        col1, col2 = st.columns(2)
+        with col1:
+            yakit_lt = st.number_input("Litre", min_value=0.0, step=0.1)
+        with col2:
+            birim_fiyat = st.number_input("Birim Fiyat (TL)", min_value=0.0, step=0.01)
         
         toplam_tutar = round(yakit_lt * birim_fiyat, 2)
-        st.warning(f"Hesaplanan Toplam: {toplam_tutar} ₺")
+        st.metric("Toplam Tutar", f"{toplam_tutar} ₺")
         
-        istasyon = st.text_input("İstasyon / Şehir")
+        istasyon = st.text_input("İstasyon / Şehir Bilgisi")
         
-        if st.button("YAKIT KAYDINI GÖNDER"):
-            if toplam_tutar > 0:
+        if st.button("YAKIT KAYDINI ONAYLA"):
+            if yakit_lt > 0 and birim_fiyat > 0:
                 db["Giderler"].insert_one({
                     "tarih": datetime.now(),
                     "plaka": plaka,
@@ -107,15 +117,17 @@ else:
                     "detay": istasyon,
                     "kaynak": "MOBIL"
                 })
-                st.success("Yakıt bilgisi başarıyla iletildi.")
+                st.success("Yakıt kaydı gönderildi.")
+            else:
+                st.error("Lütfen miktar ve fiyat giriniz.")
 
     with tab3:
         st.subheader("Masraf Girişi")
-        m_tip = st.selectbox("Masraf Türü", ["Yemek", "Otoyol", "Tamir", "Lastik", "Diğer"])
-        m_tutar = st.number_input("Harcama Tutarı (TL)", min_value=0.0)
-        aciklama = st.text_area("Açıklama")
+        m_tip = st.selectbox("Masraf Tipi", ["Yemek", "Otoyol/Köprü", "Tamir", "Diğer"])
+        m_tutar = st.number_input("Tutar (TL)", min_value=0.0)
+        aciklama = st.text_area("Açıklama / Detay")
         
-        if st.button("MASRAFI KAYDET"):
+        if st.button("MASRAFI GÖNDER"):
             if m_tutar > 0:
                 db["Giderler"].insert_one({
                     "tarih": datetime.now(),
@@ -126,4 +138,4 @@ else:
                     "aciklama": aciklama,
                     "kaynak": "MOBIL"
                 })
-                st.success("Masraf kaydı oluşturuldu.")
+                st.success("Masraf kaydı veritabanına işlendi.")
