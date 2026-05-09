@@ -6,8 +6,6 @@ from datetime import datetime
 import urllib.parse
 
 # --- 1. BULUT BAĞLANTI AYARLARI ---
-# NOT: Masaüstü uygulaman hangi MongoDB'ye bağlanıyorsa buraya onu yazmalısın.
-# Eğer Masaüstü de bu adrese bağlanıyorsa sorun yok.
 USER = "admin"
 PASS = urllib.parse.quote_plus("Hs19051905")
 CLUSTER = "cluster0.p1ojawz.mongodb.net"
@@ -17,7 +15,6 @@ CONNECTION_STRING = f"mongodb+srv://{USER}:{PASS}@{CLUSTER}/?retryWrites=true&w=
 @st.cache_resource
 def get_db():
     try:
-        # Masaüstü kodunda olduğu gibi bağlantıyı kuruyoruz
         client = MongoClient(CONNECTION_STRING, tlsCAFile=certifi.where())
         return client[DB_NAME]
     except Exception as e:
@@ -37,29 +34,29 @@ if not st.session_state['login']:
     st.title("🔐 Şoför Giriş Paneli")
     
     try:
-        # Araç listesini çek
-        araclar_data = list(db["Araclar"].find({}, {"plaka": 1}))
+        # Araçları ve şifrelerini çekiyoruz
+        araclar_data = list(db["Araclar"].find({}, {"plaka": 1, "sifre": 1}))
         plakalar = [a["plaka"] for a in araclar_data]
     except:
         plakalar = ["Hata: Araçlar Yüklenemedi"]
 
     secili_plaka = st.selectbox("Aracınızı Seçin", plakalar)
-    sifre = st.text_input("Giriş Şifresi (Plakanın Son 4 Hanesi)", type="password")
+    girilen_sifre = st.text_input("Giriş Şifresi", type="password")
     
     if st.button("SİSTEME GİRİŞ YAP"):
-        # Şifre kontrolü (Masaüstü gibi plakayı temizleyip bakıyoruz)
-        temiz_plaka = secili_plaka.replace(" ", "").upper()
-        dogru_sifre = temiz_plaka[-4:]
+        # Seçilen aracın veritabanındaki şifresini bul
+        hedef_arac = next((a for a in araclar_data if a["plaka"] == secili_plaka), None)
         
-        if sifre == dogru_sifre:
+        # PC'den belirlediğin şifre kontrolü
+        if hedef_arac and str(hedef_arac.get("sifre")) == girilen_sifre:
             st.session_state['login'] = True
             st.session_state['plaka'] = secili_plaka
             st.rerun()
         else:
-            st.error("Hatalı Şifre!")
+            st.error("Hatalı Şifre! Lütfen PC'de belirlediğiniz şifreyi girin.")
 
 else:
-    # --- 4. ANA PANEL ---
+    # --- 4. ANA PANEL (Giriş Başarılı) ---
     st.title(f"🚛 {st.session_state['plaka']}")
     
     tab1, tab2, tab3 = st.tabs(["📍 KM GİRİŞİ", "⛽ YAKIT ALIMI", "💰 MASRAF YAZ"])
@@ -67,37 +64,66 @@ else:
 
     with tab1:
         st.subheader("Sefer Kilometre Takibi")
-        
-        # --- KRİTİK UYUM GÜNCELLEMESİ ---
-        # Masaüstü kodun durumu "BEKLEMEDE" olarak kaydediyor.
-        # Ayrıca plakayı "58ABC123" (boşluksuz) formatında aratıyoruz.
         aktif_sefer = db["Seferler"].find_one({
             "plaka": {"$regex": plaka.replace(" ", ""), "$options": "i"},
             "durum": "BEKLEMEDE" 
-        }, sort=[("kayit_tarihi", -1)]) # En son eklenen seferi getir
+        }, sort=[("kayit_tarihi", -1)])
         
         if aktif_sefer:
-            # Masaüstü kodunda duraklar "guzergah_detay" olarak metin formatında geliyor
-            rota = aktif_sefer.get('guzergah_detay', "Rota Bilgisi Yok")
-            st.info(f"✅ **Güzergah:** {rota}")
-            
+            st.success(f"✅ Güzergah: {aktif_sefer.get('guzergah_detay', 'Bilinmiyor')}")
             c_km = st.number_input("Depo Çıkış KM", value=0.0)
             d_km = st.number_input("Dönüş KM (Sefer Sonu)", value=0.0)
             
             if st.button("KM BİLGİLERİNİ KAYDET"):
                 fiili = d_km - c_km if d_km > c_km else 0
-                
-                # Güncelleme: Durumu TAMAMLANDI yapıyoruz
                 db["Seferler"].update_one(
                     {"_id": aktif_sefer["_id"]},
-                    {"$set": {
-                        "depo_cikis_km": c_km,
-                        "donus_km": d_km,
-                        "fiili_km": fiili,
-                        "durum": "TAMAMLANDI" if d_km > 0 else "BEKLEMEDE",
-                        "mobil_onay_tarihi": datetime.now()
-                    }}
+                    {"$set": {"depo_cikis_km": c_km, "donus_km": d_km, "fiili_km": fiili, "durum": "TAMAMLANDI"}}
                 )
-                st.success(f"Kaydedildi! Fiili Mesafe: {fiili} KM")
+                st.success("Sefer bilgileri güncellendi.")
         else:
-            st.warning("Üzerinizde 'BEKLEMEDE' olan bir sefer bulunamadı.")
+            st.warning("Aktif bir sefer bulunamadı.")
+
+    with tab2:
+        st.subheader("Yakıt Alım Girişi")
+        # Litre ve Birim Fiyat ile Otomatik Toplam Tutar
+        yakit_lt = st.number_input("Kaç Litre Alındı?", min_value=0.0, step=0.1)
+        birim_fiyat = st.number_input("Litre Fiyatı (TL)", min_value=0.0, step=0.1)
+        
+        toplam_tutar = round(yakit_lt * birim_fiyat, 2)
+        st.warning(f"Hesaplanan Toplam: {toplam_tutar} ₺")
+        
+        istasyon = st.text_input("İstasyon / Şehir")
+        
+        if st.button("YAKIT KAYDINI GÖNDER"):
+            if toplam_tutar > 0:
+                db["Giderler"].insert_one({
+                    "tarih": datetime.now(),
+                    "plaka": plaka,
+                    "tip": "YAKIT",
+                    "miktar": yakit_lt,
+                    "birim_fiyat": birim_fiyat,
+                    "tutar": toplam_tutar,
+                    "detay": istasyon,
+                    "kaynak": "MOBIL"
+                })
+                st.success("Yakıt bilgisi başarıyla iletildi.")
+
+    with tab3:
+        st.subheader("Masraf Girişi")
+        m_tip = st.selectbox("Masraf Türü", ["Yemek", "Otoyol", "Tamir", "Lastik", "Diğer"])
+        m_tutar = st.number_input("Harcama Tutarı (TL)", min_value=0.0)
+        aciklama = st.text_area("Açıklama")
+        
+        if st.button("MASRAFI KAYDET"):
+            if m_tutar > 0:
+                db["Giderler"].insert_one({
+                    "tarih": datetime.now(),
+                    "plaka": plaka,
+                    "tip": "MASRAF",
+                    "kategori": m_tip,
+                    "tutar": m_tutar,
+                    "aciklama": aciklama,
+                    "kaynak": "MOBIL"
+                })
+                st.success("Masraf kaydı oluşturuldu.")
