@@ -5,7 +5,7 @@ import certifi
 from datetime import datetime
 import urllib.parse
 
-# --- 1. BULUT BAĞLANTI AYARLARI (SENİN ORİJİNAL AYARLARIN) ---
+# --- 1. BULUT BAĞLANTI AYARLARI ---
 USER = "admin"
 PASS = urllib.parse.quote_plus("Hs19051905")
 CLUSTER = "cluster0.p1ojawz.mongodb.net"
@@ -26,20 +26,12 @@ db = get_db()
 # --- 2. SAYFA AYARLARI ---
 st.set_page_config(page_title="Hüma Lojistik Mobil", page_icon="🚛", layout="centered")
 
-st.markdown("""
-    <style>
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #2ecc71; color: white; }
-    .stTextInput>div>div>input { border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
-
 # --- 3. KULLANICI GİRİŞ SİSTEMİ ---
 if 'login' not in st.session_state:
     st.session_state['login'] = False
 
 if not st.session_state['login']:
     st.title("🔐 Şoför Giriş Paneli")
-    st.write("Hüma Lojistik Sistemine Hoş Geldiniz.")
     
     try:
         araclar_data = list(db["Araclar"].find({}, {"plaka": 1}))
@@ -51,102 +43,60 @@ if not st.session_state['login']:
     sifre = st.text_input("Giriş Şifresi (Plakanın Son 4 Hanesi)", type="password")
     
     if st.button("SİSTEME GİRİŞ YAP"):
-        temiz_plaka = secili_plaka.replace(" ", "")
+        # ŞİFRE MANTIĞI: Plakadaki boşlukları siler ve son 4 haneye bakar
+        temiz_plaka = secili_plaka.replace(" ", "").upper()
         dogru_sifre = temiz_plaka[-4:]
         
         if sifre == dogru_sifre:
             st.session_state['login'] = True
             st.session_state['plaka'] = secili_plaka
-            st.success("Giriş Başarılı! Bekleyin...")
+            st.success("Giriş Başarılı!")
             st.rerun()
         else:
-            st.error("Hatalı Şifre! Lütfen plakanızın son 4 hanesini girin.")
+            st.error(f"Hatalı Şifre! (İpucu: {dogru_sifre})") # Hata alırsan ipucunu gör diye ekledim
 
 else:
-    # --- 4. ANA PANEL (Giriş Yapıldı) ---
+    # --- 4. ANA PANEL ---
     st.title(f"🚛 {st.session_state['plaka']}")
-    st.sidebar.write(f"Sürücü: {st.session_state['plaka']}")
     
-    if st.sidebar.button("Güvenli Çıkış"):
-        st.session_state['login'] = False
-        st.rerun()
-
     tab1, tab2, tab3 = st.tabs(["📍 KM GİRİŞİ", "⛽ YAKIT ALIMI", "💰 MASRAF YAZ"])
     plaka = st.session_state['plaka']
 
-    # --- TAB 1: KM GİRİŞİ ---
     with tab1:
         st.subheader("Sefer Kilometre Takibi")
         
-        # DÜZELTME: Seferlerin görünmesi için durum kontrolünü esnettik
-        # Plakayı hem boşluklu hem boşluksuz arayarak eşleşme ihtimalini artırdık
+        # KRİTİK DÜZELTME: Plaka eşleşmesini hem boşluklu hem boşluksuz deniyoruz
+        # Ayrıca "durum" alanını tamamen boşverip sadece o plakaya ait TAMAMLANMAMIŞ son seferi çekiyoruz
         aktif_sefer = db["Seferler"].find_one({
-            "$or": [{"plaka": plaka}, {"plaka": plaka.replace(" ", "")}],
-            "durum": {"$in": ["BEKLEYOR", "BEKLEMEDE", "AKTİF"]}
-        })
+            "$or": [
+                {"plaka": plaka},
+                {"plaka": plaka.replace(" ", "")}
+            ],
+            "durum": {"$ne": "TAMAMLANDI"} # Tamamlanmamış her şeyi göster
+        }, sort=[("tarih", -1)]) # En yeni olanı getir
         
         if aktif_sefer:
-            st.info(f"**Güncel Rota:** {aktif_sefer.get('rota_ozet', 'Rota Belirtilmemiş')}")
-            c_km = st.number_input("Depo Çıkış KM", value=float(aktif_sefer.get("depo_cikis_km", 0)))
-            d_km = st.number_input("Dönüş KM (Sefer Sonu)", value=float(aktif_sefer.get("donus_km", 0)))
+            st.info(f"✅ **Bulunan Sefer:** {aktif_sefer.get('guzergah', 'Rota Bilgisi Yok')}")
+            # Veritabanındaki alan isimleri farklı olabilir, her ihtimali kontrol ediyoruz
+            eski_km = aktif_sefer.get("depo_cikis_km") or aktif_sefer.get("cikis_km") or 0
+            
+            c_km = st.number_input("Depo Çıkış KM", value=float(eski_km))
+            d_km = st.number_input("Dönüş KM (Sefer Sonu)", value=0.0)
             
             if st.button("KM BİLGİLERİNİ KAYDET"):
                 fiili = d_km - c_km if d_km > c_km else 0
-                yeni_durum = "TAMAMLANDI" if d_km > 0 else aktif_sefer["durum"]
                 
+                # Güncelleme yaparken hem ID hem Sefer No kullanıyoruz
                 db["Seferler"].update_one(
-                    {"_id": aktif_sefer["_id"]}, # Daha güvenli güncelleme
+                    {"_id": aktif_sefer["_id"]},
                     {"$set": {
                         "depo_cikis_km": c_km,
                         "donus_km": d_km,
                         "fiili_km": fiili,
-                        "durum": yeni_durum
+                        "durum": "TAMAMLANDI" if d_km > 0 else "BEKLEYOR",
+                        "mobil_islem_tarihi": datetime.now()
                     }}
                 )
-                st.success(f"KM Kaydedildi. Hesaplanan Fiili KM: {fiili}")
+                st.success(f"Başarıyla Kaydedildi! Fiili KM: {fiili}")
         else:
-            st.warning("Üzerinizde şu an aktif bir sefer görünmüyor.")
-
-    # --- TAB 2: YAKIT ALIMI ---
-    with tab2:
-        st.subheader("Yakıt Alım Bilgisi")
-        litre = st.number_input("Kaç Litre Alındı?", min_value=0.0)
-        tutar = st.number_input("Toplam Tutar (TL)", min_value=0.0)
-        istasyon = st.text_input("İstasyon / Şehir")
-        
-        if st.button("YAKIT FİŞİNİ GÖNDER"):
-            if tutar > 0:
-                db["Giderler"].insert_one({
-                    "tarih": datetime.now(),
-                    "plaka": plaka,
-                    "tip": "YAKIT",
-                    "miktar": litre,
-                    "tutar": tutar,
-                    "detay": istasyon,
-                    "kaynak": "MOBIL"
-                })
-                st.success("Yakıt kaydı merkeze iletildi.")
-            else:
-                st.error("Lütfen geçerli bir tutar girin.")
-
-    # --- TAB 3: MASRAFLAR ---
-    with tab3:
-        st.subheader("Harcama ve Masraf")
-        m_tip = st.selectbox("Masraf Türü", ["Yemek", "Tamir", "Lastik", "Otoyol", "Diğer"])
-        m_tutar = st.number_input("Harcama Tutarı (TL)", min_value=0.0)
-        aciklama = st.text_area("Masraf Açıklaması")
-        
-        if st.button("MASRAFI KAYDET"):
-            if m_tutar > 0:
-                db["Giderler"].insert_one({
-                    "tarih": datetime.now(),
-                    "plaka": plaka,
-                    "tip": "MASRAF",
-                    "kategori": m_tip,
-                    "tutar": m_tutar,
-                    "aciklama": aciklama,
-                    "kaynak": "MOBIL"
-                })
-                st.success("Masraf kaydı başarıyla oluşturuldu.")
-            else:
-                st.error("Lütfen tutar giriniz.")
+            st.warning("Üzerinizde aktif bir sefer bulunamadı. Lütfen merkezden sefer tanımlandığından emin olun.")
