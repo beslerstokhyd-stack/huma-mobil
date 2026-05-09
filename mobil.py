@@ -5,14 +5,15 @@ from datetime import datetime
 # 1. SAYFA AYARLARI
 st.set_page_config(page_title="Hüma Lojistik Mobil", page_icon="🚚", layout="centered")
 
-# 2. VERİTABANI BAĞLANTISI (Atlas Verileri Buradan Alınıyor)
-# Not: Bağlantı adresindeki karakter hataları giderildi.
+# 2. VERİTABANI BAĞLANTISI (Atlas Panelindeki Bilgilere Göre)
 @st.cache_resource
 def init_connection():
-    return MongoClient("mongodb+srv://beslerstokhyd:Asdfgh123.@cluster0.v8v6f.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+    # Şifrendeki noktaya ve kullanıcı adına dikkat ederek bağlantıyı kuruyoruz
+    return MongoClient("mongodb+srv://beslerstokhyd:Asdfgh123.@cluster0.v8v6f.mongodb.net/?retryWrites=true&w=majority")
 
 client = init_connection()
-db = client["HumaLojistik"]
+# Atlas panelinde görünen gerçek veritabanı adın
+db = client["SivasLojistikDB"] 
 
 # 3. GİRİŞ KONTROLÜ
 if 'logged_in' not in st.session_state:
@@ -20,105 +21,58 @@ if 'logged_in' not in st.session_state:
 
 if not st.session_state['logged_in']:
     st.title("🚚 Hüma Lojistik Giriş")
-    st.subheader("Şoför Giriş Paneli")
     
-    user_input = st.text_input("Kullanıcı Adı (Personel Panelindeki Adınız)")
-    sifre_input = st.text_input("Şifre (Kendi Belirlediğiniz Özel Şifre)", type="password")
+    user_input = st.text_input("Kullanıcı Adı")
+    sifre_input = st.text_input("Şifre", type="password")
     
     if st.button("SİSTEME GİRİŞ YAP"):
-        # Veritabanındaki 'Kullanicilar' tablosundan sorgulama yapıyoruz
-        kullanici_kaydi = db["Kullanicilar"].find_one({
-            "username": user_input,
-            "password": sifre_input
-        })
+        # Kullanicilar tablosundan kontrol
+        kullanici = db["Kullanicilar"].find_one({"username": user_input, "password": sifre_input})
         
-        if kullanici_kaydi:
-            # Personelin üzerine kayıtlı plakayı çekiyoruz
-            personel_detay = db["Personel"].find_one({"username": user_input})
-            
+        if kullanici:
             st.session_state['logged_in'] = True
             st.session_state['user_name'] = user_input
-            st.session_state['plaka'] = personel_detay.get("atanan_plaka", "BOŞTA") if personel_detay else "BOŞTA"
-            st.success("Giriş Başarılı! Yönlendiriliyorsunuz...")
+            # Personel tablosundan araç bilgisini çek
+            p_bilgi = db["Personel"].find_one({"username": user_input})
+            st.session_state['plaka'] = p_bilgi.get("atanan_plaka", "ARAÇSIZ") if p_bilgi else "ARAÇSIZ"
+            st.success("Giriş Başarılı!")
             st.rerun()
         else:
-            st.error("Hatalı Kullanıcı Adı veya Şifre! Lütfen Personel Yönetimi'ndeki bilgilerinizi kontrol edin.")
+            st.error("Hatalı Kullanıcı Adı veya Şifre!")
 
 else:
-    # 4. ANA UYGULAMA EKRANI
-    plaka = st.session_state['plaka']
+    # 4. ANA PANEL
+    st.sidebar.success(f"Hoş geldin: {st.session_state['user_name']}")
+    st.title(f"🚛 Araç: {st.session_state['plaka']}")
     
-    with st.sidebar:
-        st.header("Hüma Lojistik")
-        st.write(f"👤 **Şoför:** {st.session_state['user_name']}")
-        st.write(f"🚛 **Araç:** {plaka}")
-        if st.button("Güvenli Çıkış"):
-            st.session_state['logged_in'] = False
-            st.rerun()
+    tab1, tab2 = st.tabs(["📍 SEFER", "⛽ YAKIT/MASRAF"])
 
-    st.title(f"Plaka: {plaka}")
-    
-    tab1, tab2, tab3 = st.tabs(["📍 SEFER TAKİBİ", "⛽ YAKIT ALIMI", "💰 MASRAF YAZ"])
-
-    # --- TAB 1: SEFER TAKİBİ ---
     with tab1:
-        st.subheader("Aktif Sefer Bilgileri")
-        
-        # 'BEKLEMEDE' ve 'BEKLEYOR' durumundaki seferleri Atlas'tan çekiyoruz
-        aktif_sefer = db["Seferler"].find_one({
-            "plaka": {"$regex": plaka.replace(" ", ""), "$options": "i"},
-            "durum": {"$in": ["BEKLEYOR", "BEKLEMEDE", "AKTİF", "YOLDA"]}
+        # Aktif seferi bul (BEKLEMEDE veya AKTİF olanlar)
+        sefer = db["Seferler"].find_one({
+            "plaka": {"$regex": st.session_state['plaka'].replace(" ", ""), "$options": "i"},
+            "durum": {"$in": ["BEKLEYOR", "BEKLEMEDE", "AKTİF"]}
         })
-
-        if aktif_sefer and plaka != "BOŞTA":
-            st.info(f"✅ Sefer No: {aktif_sefer.get('sefer_no', 'N/A')}")
-            st.write(f"📅 **Tarih:** {aktif_sefer.get('tarih', '')}")
-            st.write(f"🌍 **Güzergah:** {aktif_sefer.get('guzergah', 'Belirtilmedi')}")
-            
-            yeni_km = st.number_input("Güncel Kilometre Giriniz", min_value=0)
-            if st.button("KİLOMETREYİ GÜNCELLE"):
-                db["Seferler"].update_one(
-                    {"_id": aktif_sefer["_id"]},
-                    {"$set": {"fiili_km": yeni_km, "guncelleme_tarihi": datetime.now()}}
-                )
-                st.success("Kilometre bilgisi başarıyla güncellendi.")
-        else:
-            st.warning("⚠️ Şu an üzerinize tanımlı aktif bir sefer bulunamadı. Lütfen masaüstü panelinden sefer durumunu kontrol edin.")
-
-    # --- TAB 2: YAKIT GİRİŞİ ---
-    with tab2:
-        st.subheader("⛽ Yakıt Bilgisi")
-        litre = st.number_input("Alınan Litre", min_value=0.0)
-        tutar = st.number_input("Toplam Tutar (₺)", min_value=0.0)
         
-        if st.button("YAKIT KAYDINI GÖNDER"):
-            db["Yakitlar"].insert_one({
+        if sefer:
+            st.info(f"Sefer: {sefer.get('guzergah', 'Belirsiz')}")
+            yeni_km = st.number_input("Güncel KM", min_value=0)
+            if st.button("KM GÜNCELLE"):
+                db["Seferler"].update_one({"_id": sefer["_id"]}, {"$set": {"fiili_km": yeni_km}})
+                st.success("KM Kaydedildi.")
+        else:
+            st.warning("Aktif seferiniz bulunmamaktadır.")
+
+    with tab2:
+        st.subheader("Masraf Kaydı")
+        tip = st.selectbox("Tür", ["Yakıt", "Yemek", "Tamir", "Diğer"])
+        tutar = st.number_input("Tutar (₺)", min_value=0.0)
+        if st.button("KAYDET"):
+            db["Giderler"].insert_one({
                 "tarih": datetime.now(),
-                "plaka": plaka,
+                "plaka": st.session_state['plaka'],
                 "sofor": st.session_state['user_name'],
-                "litre": litre,
+                "kategori": tip,
                 "tutar": tutar
             })
-            st.success("Yakıt verisi başarıyla Atlas'a gönderildi.")
-
-    # --- TAB 3: MASRAF YAZMA ---
-    with tab3:
-        st.subheader("💰 Masraf ve Giderler")
-        m_tip = st.selectbox("Masraf Türü", ["Yemek", "Tamir", "Otoyol / Köprü", "AdBlue", "Lastik", "Avans", "Park / Yıkama", "DİĞER"])
-        m_tutar = st.number_input("Tutar (₺)", min_value=0.0)
-        m_not = st.text_area("Masraf Açıklaması")
-        
-        if st.button("MASRAFI KAYDET"):
-            if m_tutar > 0:
-                db["Giderler"].insert_one({
-                    "tarih": datetime.now(),
-                    "plaka": plaka,
-                    "sofor": st.session_state['user_name'],
-                    "kategori": m_tip,
-                    "tutar": m_tutar,
-                    "not": m_not,
-                    "kaynak": "MOBIL"
-                })
-                st.success("Masraf kaydı merkeze iletildi.")
-            else:
-                st.error("Lütfen bir tutar giriniz!")
+            st.success("Masraf merkeze iletildi.")
