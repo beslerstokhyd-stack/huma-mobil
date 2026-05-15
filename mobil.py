@@ -73,7 +73,7 @@ else:
     st.sidebar.markdown(f"### 🆔 {st.session_state['plaka']}")
     st.sidebar.divider()
     
-    tab1, tab2, tab3 = st.tabs(["📍 AKTİF GÖREV", "⛽ YAKIT GİRİŞİ", "💰 DİĞER MASRAFLAR"])
+    tab1, tab2, tab3 = st.tabs(["📍 AKTİF SEFER", "⛽ YAKIT ALIMI", "💰 MASRAFLAR"])
 
     # --- TAB 1: SEFER VE NAVİGASYON ---
     with tab1:
@@ -113,7 +113,7 @@ else:
             st.info("Şu an aktif bir seferiniz bulunmuyor. Merkezden görev bekleniyor...")
             if st.button("🔄 Listeyi Yenile"): st.rerun()
 
-    # --- TAB 2: YAKIT ALIMI (İSTEDİĞİN OTOMATİK HESAPLAMA) ---
+    # --- TAB 2: YAKIT ALIMI (PC PANELİ İLE %100 UYUMLU) ---
     with tab2:
         st.subheader("⛽ Yakıt Alım Bilgisi")
         
@@ -133,44 +133,48 @@ else:
         """, unsafe_allow_html=True)
         
         st.divider()
-        istasyon = st.text_input("📍 İstasyon Adı / Şehir", placeholder="Örn: Shell - Sivas Merkez")
+        istasyon = st.text_input("📍 İstasyon / Açıklama", placeholder="Örn: Shell - Sivas Merkez")
         
         if st.button("🚀 YAKIT KAYDINI GÖNDER"):
             if litre > 0 and pompa_fiyat > 0:
-                db["Giderler"].insert_one({
-                    "tarih": datetime.now(),
+                yeni_gider = {
+                    "gider_id": datetime.now().strftime("%Y%m%d%H%M%S"),
+                    "tarih": datetime.now().strftime("%d/%m/%Y"), # PC Paneli GG/AA/YYYY formatı bekliyor
                     "plaka": st.session_state['plaka'],
+                    "tur": "YAKIT", # PC Paneli "tur" anahtarını ve "YAKIT" değerini bekliyor
+                    "tutar": float(toplam_tutar), # PC Paneli "tutar" anahtarını bekliyor
+                    "lt": float(litre), # PC Paneli "lt" anahtarını bekliyor
                     "sofor": st.session_state['user'],
-                    "tip": "YAKIT",
-                    "miktar_lt": litre,
-                    "birim_fiyat": pompa_fiyat,
-                    "toplam_tutar": toplam_tutar,
-                    "lokasyon": istasyon,
-                    "kayit_anlik": datetime.now().strftime("%H:%M:%S")
-                })
+                    "kaynak": "MOBIL",
+                    "not": istasyon # PC Paneli "not" anahtarını bekliyor
+                }
+                db["Giderler"].insert_one(yeni_gider)
                 st.success("Yakıt kaydı başarıyla merkeze iletildi!")
             else:
                 st.error("Lütfen litre ve birim fiyat bilgilerini giriniz!")
 
-    # --- TAB 3: DİĞER MASRAFLAR ---
+    # --- TAB 3: DİĞER MASRAFLAR (PC PANELİ İLE %100 UYUMLU) ---
     with tab3:
         st.subheader("💰 Harcama Bildir")
-        m_tip = st.selectbox("Harcama Türü", ["Yemek", "Tamir/Bakım", "Otoyol/Köprü", "AdBlue", "Lastik", "Diğer"])
+        # PC Paneli seçenekleri: ["YAKIT", "BAKIM", "TAMİR", "SİGORTA", "LASTİK", "AVANS", "DİĞER"]
+        m_tip = st.selectbox("Harcama Türü", ["Yemek", "Tamir", "Bakım", "Lastik", "Avans", "Diğer"])
         m_tutar = st.number_input("Harcama Tutarı (₺)", min_value=0.0)
         m_not = st.text_area("Açıklama (Ne için harcandı?)")
         
         if st.button("✅ MASRAFI SİSTEME İŞLE"):
             if m_tutar > 0:
-                db["Giderler"].insert_one({
-                    "tarih": datetime.now(),
+                yeni_masraf = {
+                    "gider_id": datetime.now().strftime("%Y%m%d%H%M%S"),
+                    "tarih": datetime.now().strftime("%d/%m/%Y"),
                     "plaka": st.session_state['plaka'],
+                    "tur": m_tip.upper(), # PC Paneli büyük harf bekler
+                    "tutar": float(m_tutar),
+                    "lt": 0.0, # Masraflarda litre 0 olmalı
                     "sofor": st.session_state['user'],
-                    "tip": "MASRAF",
-                    "kategori": m_tip,
-                    "tutar": m_tutar,
-                    "aciklama": m_not,
-                    "onay_durumu": "BEKLEMEDE"
-                })
+                    "kaynak": "MOBIL",
+                    "not": m_not
+                }
+                db["Giderler"].insert_one(yeni_masraf)
                 st.success("Harcama kaydı onaya gönderildi.")
             else: st.error("Lütfen tutar giriniz!")
 
