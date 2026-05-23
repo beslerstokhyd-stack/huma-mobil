@@ -4,7 +4,7 @@ from pymongo import MongoClient
 import certifi
 from datetime import datetime
 import urllib.parse
-import pandas as pd
+import hashlib  # Şifreleme için eklendi
 
 # --- VERİTABANI BAĞLANTISI ---
 USER = "admin"
@@ -13,17 +13,25 @@ CLUSTER = "cluster0.p1ojawz.mongodb.net"
 DB_NAME = "SivasLojistikDB"
 CONNECTION_STRING = f"mongodb+srv://{USER}:{PASS}@{CLUSTER}/?retryWrites=true&w=majority&appName=Cluster0&tlsAllowInvalidCertificates=true"
 
+# Şifreyi masaüstü uygulamasıyla aynı formatta (SHA-256) şifreleyen fonksiyon
+def sifre_hashle(sifre):
+    if not sifre: return ""
+    # Eğer şifre zaten 64 karakterse (hashlenmişse) dokunma
+    if len(str(sifre)) == 64: return sifre
+    return hashlib.sha256(str(sifre).encode()).hexdigest()
+
 @st.cache_resource
 def get_db():
     try:
         client = MongoClient(CONNECTION_STRING, tlsCAFile=certifi.where())
         return client[DB_NAME]
     except Exception as e:
-        st.error(f"Veritabanı Bağlantı Hatası: {e}"); return None
+        st.error(f"Veritabanı Bağlantı Hatası: {e}")
+        return None
 
 db = get_db()
 
-# --- ARAYÜZ TASARIMI (DARK MODE & MOBİL UYUMLU) ---
+# --- ARAYÜZ TASARIMI ---
 st.set_page_config(page_title="Sivas Lojistik Mobil", page_icon="🚛", layout="centered")
 
 st.markdown("""
@@ -50,22 +58,30 @@ if not st.session_state['login']:
         if db is not None:
             araclar_listesi = [a["plaka"] for a in list(db["Araclar"].find({}, {"plaka": 1}))]
             plaka = st.selectbox("🚛 Aracınızı Seçin", ["Plaka Seçiniz..."] + araclar_listesi)
-            sifre = st.text_input("🔑 Şifreniz", type="password")
+            sifre_input = st.text_input("🔑 Şifreniz", type="password")
             
             if st.button("SİSTEME GİRİŞ YAP"):
                 arac_doc = db["Araclar"].find_one({"plaka": plaka})
                 mobil_user = arac_doc.get("mobil_user") if arac_doc else None
                 
                 if mobil_user and mobil_user != "YETKİ YOK / GİREMEZ":
-                    user_doc = db["Kullanicilar"].find_one({"username": mobil_user})
-                    if user_doc and str(user_doc.get("password")) == str(sifre):
+                    # Kullanıcı adını büyük harfe çevirip sorguluyoruz
+                    kullanici_adi_buyuk = str(mobil_user).upper()
+                    user_doc = db["Kullanicilar"].find_one({"username": kullanici_adi_buyuk})
+                    
+                    # Girilen şifreyi hashleyip veritabanındakiyle karşılaştırıyoruz
+                    hashli_sifre = sifre_hashle(sifre_input)
+                    
+                    if user_doc and str(user_doc.get("password")) == hashli_sifre:
                         st.session_state['login'] = True
                         st.session_state['plaka'] = plaka
                         st.session_state['user'] = user_doc.get("username")
                         st.success("Giriş Başarılı! Yönlendiriliyorsunuz...")
                         st.rerun()
-                    else: st.error("❌ Hatalı Şifre!")
-                else: st.error("❌ Bu araç için mobil erişim yetkisi bulunamadı!")
+                    else: 
+                        st.error("❌ Hatalı Şifre!")
+                else: 
+                    st.error("❌ Bu araç için mobil erişim yetkisi bulunamadı!")
 
 # --- ANA PANEL ---
 else:
@@ -92,6 +108,7 @@ else:
             
             duraklar = sefer.get("rota", [])
             if duraklar:
+                # Harita linki oluşturma
                 map_url = f"https://www.google.com/maps/dir/{'/'.join(duraklar)}"
                 st.link_button("🗺️ NAVİGASYONU BAŞLAT (GOOGLE HARİTALAR)", map_url)
 
@@ -113,7 +130,7 @@ else:
             st.info("Şu an aktif bir seferiniz bulunmuyor. Merkezden görev bekleniyor...")
             if st.button("🔄 Listeyi Yenile"): st.rerun()
 
-    # --- TAB 2: YAKIT ALIMI (PC PANELİ İLE %100 UYUMLU) ---
+    # --- TAB 2: YAKIT ALIMI ---
     with tab2:
         st.subheader("⛽ Yakıt Alım Bilgisi")
         
@@ -139,24 +156,23 @@ else:
             if litre > 0 and pompa_fiyat > 0:
                 yeni_gider = {
                     "gider_id": datetime.now().strftime("%Y%m%d%H%M%S"),
-                    "tarih": datetime.now().strftime("%d/%m/%Y"), # PC Paneli GG/AA/YYYY formatı bekliyor
+                    "tarih": datetime.now().strftime("%d/%m/%Y"),
                     "plaka": st.session_state['plaka'],
-                    "tur": "YAKIT", # PC Paneli "tur" anahtarını ve "YAKIT" değerini bekliyor
-                    "tutar": float(toplam_tutar), # PC Paneli "tutar" anahtarını bekliyor
-                    "lt": float(litre), # PC Paneli "lt" anahtarını bekliyor
+                    "tur": "YAKIT",
+                    "tutar": float(toplam_tutar),
+                    "lt": float(litre),
                     "sofor": st.session_state['user'],
                     "kaynak": "MOBIL",
-                    "not": istasyon # PC Paneli "not" anahtarını bekliyor
+                    "not": istasyon
                 }
                 db["Giderler"].insert_one(yeni_gider)
                 st.success("Yakıt kaydı başarıyla merkeze iletildi!")
             else:
                 st.error("Lütfen litre ve birim fiyat bilgilerini giriniz!")
 
-    # --- TAB 3: DİĞER MASRAFLAR (PC PANELİ İLE %100 UYUMLU) ---
+    # --- TAB 3: DİĞER MASRAFLAR ---
     with tab3:
         st.subheader("💰 Harcama Bildir")
-        # PC Paneli seçenekleri: ["YAKIT", "BAKIM", "TAMİR", "SİGORTA", "LASTİK", "AVANS", "DİĞER"]
         m_tip = st.selectbox("Harcama Türü", ["Yemek", "Tamir", "Bakım", "Lastik", "Avans", "Diğer"])
         m_tutar = st.number_input("Harcama Tutarı (₺)", min_value=0.0)
         m_not = st.text_area("Açıklama (Ne için harcandı?)")
@@ -167,9 +183,9 @@ else:
                     "gider_id": datetime.now().strftime("%Y%m%d%H%M%S"),
                     "tarih": datetime.now().strftime("%d/%m/%Y"),
                     "plaka": st.session_state['plaka'],
-                    "tur": m_tip.upper(), # PC Paneli büyük harf bekler
+                    "tur": m_tip.upper(),
                     "tutar": float(m_tutar),
-                    "lt": 0.0, # Masraflarda litre 0 olmalı
+                    "lt": 0.0,
                     "sofor": st.session_state['user'],
                     "kaynak": "MOBIL",
                     "not": m_not
