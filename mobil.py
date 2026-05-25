@@ -60,7 +60,6 @@ if not st.session_state['login']:
             secenekler = ["Plaka Seçiniz...", "⭐ YÖNETİCİ GİRİŞİ"] + araclar_listesi
             secim = st.selectbox("🚛 Giriş Türü / Araç Seçin", secenekler)
             
-            # Yönetici seçildiyse Kullanıcı Adı kutusunu göster
             kullanici_adi_input = ""
             if secim == "⭐ YÖNETİCİ GİRİŞİ":
                 kullanici_adi_input = st.text_input("👤 Yönetici Kullanıcı Adı")
@@ -73,7 +72,8 @@ if not st.session_state['login']:
                 # 1. SENARYO: YÖNETİCİ GİRİŞİ
                 if secim == "⭐ YÖNETİCİ GİRİŞİ":
                     if kullanici_adi_input:
-                        user_doc = db["Personel"].find_one({
+                        # Koleksiyon adını veritabanındaki gibi 'Kullanicilar' yaptık
+                        user_doc = db["Kullanicilar"].find_one({
                             "username": kullanici_adi_input.upper(),
                             "password": hashli_sifre,
                             "yetki_seviyesi": {"$in": [0, 1]}
@@ -98,8 +98,8 @@ if not st.session_state['login']:
                     
                     if mobil_user and mobil_user != "YETKİ YOK / GİREMEZ":
                         kullanici_adi_buyuk = str(mobil_user).upper()
-                        # Şoförler de Personel tablosunda olduğu için oraya bakıyoruz
-                        user_doc = db["Personel"].find_one({"username": kullanici_adi_buyuk})
+                        # Şoförleri de 'Kullanicilar' tablosunda arıyoruz
+                        user_doc = db["Kullanicilar"].find_one({"username": kullanici_adi_buyuk})
                         
                         if user_doc and str(user_doc.get("password")) == hashli_sifre:
                             st.session_state['login'] = True
@@ -173,23 +173,27 @@ else:
                 if d_km > 0:
                     db["Seferler"].update_one({"_id": sefer["_id"]}, {"$set": {"donus_km": d_km, "durum": "TAMAMLANDI", "bitis_zamani": datetime.now()}})
                     st.success("Sefer Kapatıldı!"); st.rerun()
-        else: st.info("Aktif sefer yok."); st.button("🔄 Yenile")
+        else:
+            st.info("Aktif bir seferiniz bulunmuyor.")
+            if st.button("🔄 Yenile"): st.rerun()
 
     with tab2:
         st.subheader("⛽ Yakıt")
         lt = st.number_input("Litre", min_value=0.0, step=0.01)
         fiyat = st.number_input("Litre Fiyatı", min_value=0.0, step=0.01)
         if st.button("YAKIT KAYDINI GÖNDER"):
-            db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": "YAKIT", "tutar": float(lt*fiyat), "lt": float(lt), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
-            st.success("İletildi!")
+            if lt > 0:
+                db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": "YAKIT", "tutar": float(lt*fiyat), "lt": float(lt), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+                st.success("Kayıt iletildi!")
 
     with tab3:
         st.subheader("💰 Masraf")
         m_tip = st.selectbox("Tür", ["Yemek", "Tamir", "Bakım", "Diğer"])
         m_tutar = st.number_input("Tutar", min_value=0.0)
         if st.button("MASRAFI KAYDET"):
-            db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": m_tip.upper(), "tutar": float(m_tutar), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
-            st.success("İletildi.")
+            if m_tutar > 0:
+                db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": m_tip.upper(), "tutar": float(m_tutar), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+                st.success("Masraf iletildi.")
 
     if st.sidebar.button("🚪 ÇIKIŞ YAP"):
         st.session_state['login'] = False
