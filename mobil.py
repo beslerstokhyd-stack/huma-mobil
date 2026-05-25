@@ -182,7 +182,6 @@ else:
             st.divider()
             
             st.subheader("Sefer Kilometre Bilgileri")
-            # Hem çıkış hem dönüş kilometre girdileri eklendi
             cikis_km = st.number_input("Depo Çıkış KM", min_value=0.0, step=1.0)
             d_km = st.number_input("Depo Dönüş KM (Varış)", min_value=0.0, step=1.0)
             
@@ -194,11 +193,11 @@ else:
                 elif d_km <= cikis_km:
                     st.error("❌ Dönüş kilometresi, çıkış kilometresinden küçük veya eşit olamaz!")
                 else:
-                    # Veritabanında hem cikis_km hem donus_km güncelleniyor
+                    # DÜZELTİLDİ: Masaüstü programla tam uyum için alan adı "depo_cikis_km" yapıldı.
                     db["Seferler"].update_one(
                         {"_id": sefer["_id"]}, 
                         {"$set": {
-                            "cikis_km": float(cikis_km),
+                            "depo_cikis_km": float(cikis_km),
                             "donus_km": float(d_km), 
                             "durum": "TAMAMLANDI", 
                             "bitis_zamani": datetime.now()
@@ -214,7 +213,6 @@ else:
         fiyat = st.number_input("Litre Fiyatı", min_value=0.0, step=0.01)
         if st.button("YAKIT KAYDINI GÖNDER"):
             if lt > 0:
-                # Masaüstü uygulama ile tam uyumlu benzersiz ID oluşturuluyor
                 benzersiz_id = f"MOB-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
                 db["Giderler"].insert_one({
                     "gider_id": benzersiz_id,
@@ -234,7 +232,6 @@ else:
         m_tutar = st.number_input("Tutar", min_value=0.0)
         if st.button("MASRAFI KAYDET"):
             if m_tutar > 0:
-                # Masaüstü uygulama ile tam uyumlu benzersiz ID oluşturuluyor
                 benzersiz_id = f"MOB-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
                 db["Giderler"].insert_one({
                     "gider_id": benzersiz_id,
