@@ -5,6 +5,7 @@ import certifi
 from datetime import datetime
 import urllib.parse
 import hashlib
+import uuid  # Benzersiz ID oluşturmak için eklendi
 
 # --- VERİTABANI BAĞLANTISI ---
 USER = "admin"
@@ -122,7 +123,6 @@ elif st.session_state['role'] == 'admin':
     
     st.divider()
     
-    # Veri Hazırlama
     aktif_seferler = list(db["Seferler"].find({"durum": "BEKLEMEDE"}))
     yoldaki_plakalar = [s['plaka'] for s in aktif_seferler]
     tum_araclar = [a["plaka"] for a in list(db["Araclar"].find({}, {"plaka": 1}))]
@@ -134,7 +134,6 @@ elif st.session_state['role'] == 'admin':
         st.subheader("🚚 Yoldaki Araçlar")
         if aktif_seferler:
             for s in aktif_seferler:
-                # Hem Tarih hem Saat bilgisini çekiyoruz
                 tarih = s.get('tarih', bugun_str)
                 saat = s.get('saat', '--:--')
                 st.markdown(f"""
@@ -195,7 +194,18 @@ else:
         fiyat = st.number_input("Litre Fiyatı", min_value=0.0, step=0.01)
         if st.button("YAKIT KAYDINI GÖNDER"):
             if lt > 0:
-                db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": "YAKIT", "tutar": float(lt*fiyat), "lt": float(lt), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+                # Masaüstü uygulama ile tam uyumlu benzersiz ID oluşturuluyor
+                benzersiz_id = f"MOB-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
+                db["Giderler"].insert_one({
+                    "gider_id": benzersiz_id,
+                    "tarih": datetime.now().strftime("%d/%m/%Y"), 
+                    "plaka": st.session_state['plaka'], 
+                    "tur": "YAKIT", 
+                    "tutar": float(lt*fiyat), 
+                    "lt": float(lt), 
+                    "sofor": st.session_state['user'], 
+                    "kaynak": "MOBIL"
+                })
                 st.success("Kayıt iletildi!")
 
     with tab3:
@@ -204,7 +214,17 @@ else:
         m_tutar = st.number_input("Tutar", min_value=0.0)
         if st.button("MASRAFI KAYDET"):
             if m_tutar > 0:
-                db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": m_tip.upper(), "tutar": float(m_tutar), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+                # Masaüstü uygulama ile tam uyumlu benzersiz ID oluşturuluyor
+                benzersiz_id = f"MOB-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4]}"
+                db["Giderler"].insert_one({
+                    "gider_id": benzersiz_id,
+                    "tarih": datetime.now().strftime("%d/%m/%Y"), 
+                    "plaka": st.session_state['plaka'], 
+                    "tur": m_tip.upper(), 
+                    "tutar": float(m_tutar), 
+                    "sofor": st.session_state['user'], 
+                    "kaynak": "MOBIL"
+                })
                 st.success("Masraf iletildi.")
 
     if st.sidebar.button("🚪 ÇIKIŞ YAP"):
