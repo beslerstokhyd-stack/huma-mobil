@@ -180,11 +180,31 @@ else:
                 map_url = f"https://www.google.com/maps/dir/{'/'.join(duraklar)}"
                 st.link_button("🗺️ NAVİGASYONU BAŞLAT", map_url)
             st.divider()
-            d_km = st.number_input("Varış KM", min_value=0.0)
+            
+            st.subheader("Sefer Kilometre Bilgileri")
+            # Hem çıkış hem dönüş kilometre girdileri eklendi
+            cikis_km = st.number_input("Depo Çıkış KM", min_value=0.0, step=1.0)
+            d_km = st.number_input("Depo Dönüş KM (Varış)", min_value=0.0, step=1.0)
+            
             if st.button("SEFERİ TAMAMLA"):
-                if d_km > 0:
-                    db["Seferler"].update_one({"_id": sefer["_id"]}, {"$set": {"donus_km": d_km, "durum": "TAMAMLANDI", "bitis_zamani": datetime.now()}})
-                    st.success("Sefer Kapatıldı!"); st.rerun()
+                if cikis_km <= 0:
+                    st.error("❌ Lütfen geçerli bir Depo Çıkış KM giriniz!")
+                elif d_km <= 0:
+                    st.error("❌ Lütfen geçerli bir Depo Dönüş KM giriniz!")
+                elif d_km <= cikis_km:
+                    st.error("❌ Dönüş kilometresi, çıkış kilometresinden küçük veya eşit olamaz!")
+                else:
+                    # Veritabanında hem cikis_km hem donus_km güncelleniyor
+                    db["Seferler"].update_one(
+                        {"_id": sefer["_id"]}, 
+                        {"$set": {
+                            "cikis_km": float(cikis_km),
+                            "donus_km": float(d_km), 
+                            "durum": "TAMAMLANDI", 
+                            "bitis_zamani": datetime.now()
+                        }}
+                    )
+                    st.success("Sefer Başarıyla Kapatıldı!"); st.rerun()
         else:
             st.info("Aktif sefer yok."); st.button("🔄 Yenile")
 
