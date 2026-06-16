@@ -7,7 +7,7 @@ import urllib.parse
 import hashlib
 import uuid
 
-# --- VERİTABANI BAĞLANTISI (GÜÇLENDİRİLDİ) ---
+# --- VERİTABANI BAĞLANTISI ---
 USER = "admin"
 PASS = urllib.parse.quote_plus("Hs19051905")
 CLUSTER = "cluster0.p1ojawz.mongodb.net"
@@ -16,14 +16,12 @@ CONNECTION_STRING = f"mongodb+srv://{USER}:{PASS}@{CLUSTER}/?retryWrites=true&w=
 
 def sifre_hashle(sifre):
     if not sifre: return ""
-    # Veritabanında zaten hashli bir veri varsa 64 karakterli olacağı için olduğu gibi bırak
     if len(str(sifre)) == 64: return sifre
     return hashlib.sha256(str(sifre).encode()).hexdigest()
 
 @st.cache_resource
 def get_db():
     try:
-        # tlsCAFile parametresini sertifika hatası almamak için güvenli tutuyoruz
         client = MongoClient(CONNECTION_STRING, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=5000)
         return client[DB_NAME]
     except Exception as e:
@@ -39,10 +37,7 @@ st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     .stButton>button { width: 100%; border-radius: 12px; height: 3.5em; font-weight: bold; background-color: #2ecc71; color: white; border: none; }
-    .status-box { padding: 20px; border-radius: 15px; background-color: #161b22; border-left: 6px solid #3498db; color: white; margin-bottom: 20px; }
     .admin-card { padding: 15px; border-radius: 10px; background-color: #1e2329; border: 1px solid #3498db; margin-bottom: 10px; }
-    .calc-box { padding: 20px; border-radius: 15px; background-color: #1e2329; border: 1px solid #2ecc71; text-align: center; margin-top: 15px; }
-    .metric-val { color: #2ecc71; font-size: 30px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -53,7 +48,6 @@ if 'login' not in st.session_state: st.session_state.update({'login': False, 'ro
 if not st.session_state['login']:
     st.title("🚛 Sivas Lojistik")
     if db is not None:
-        # Plaka listesini çekerken boş gelme ihtimaline karşı kontrol
         araclar = list(db["Araclar"].find({}, {"plaka": 1}))
         araclar_listesi = [a["plaka"] for a in araclar if "plaka" in a]
         secenekler = ["Plaka Seçiniz...", "⭐ YÖNETİCİ GİRİŞİ"] + araclar_listesi
@@ -94,7 +88,6 @@ elif st.session_state['role'] == 'admin':
 else:
     tab1, tab2, tab3 = st.tabs(["📍 SEFER", "⛽ YAKIT", "💰 MASRAF"])
     with tab1:
-        # Plaka eşleşmesini .strip() ile boşluklardan arındırarak daha esnek yaptık
         sefer = db["Seferler"].find_one({"plaka": st.session_state['plaka'].strip(), "durum": "BEKLEMEDE"})
         if sefer:
             st.success(f"Aktif Görev: {sefer.get('guzergah_detay')}")
@@ -111,14 +104,32 @@ else:
         lt = st.number_input("Litre", min_value=0.0, step=0.01)
         fiyat = st.number_input("Litre Fiyatı", min_value=0.0, step=0.01)
         if st.button("YAKIT KAYDET"):
-            db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": "YAKIT", "tutar": float(lt*fiyat), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+            # GİDER_ID EKLEMESİ YAPILDI
+            db["Giderler"].insert_one({
+                "gider_id": f"MOB-{uuid.uuid4().hex[:8]}", 
+                "tarih": datetime.now().strftime("%d/%m/%Y"), 
+                "plaka": st.session_state['plaka'], 
+                "tur": "YAKIT", 
+                "tutar": float(lt*fiyat), 
+                "sofor": st.session_state['user'], 
+                "kaynak": "MOBIL"
+            })
             st.success("İletildi!")
 
     with tab3:
         m_tip = st.selectbox("Tür", ["Yemek", "Tamir", "Bakım", "Diğer"])
         m_tutar = st.number_input("Tutar", min_value=0.0)
         if st.button("MASRAFI KAYDET"):
-            db["Giderler"].insert_one({"tarih": datetime.now().strftime("%d/%m/%Y"), "plaka": st.session_state['plaka'], "tur": m_tip.upper(), "tutar": float(m_tutar), "sofor": st.session_state['user'], "kaynak": "MOBIL"})
+            # GİDER_ID EKLEMESİ YAPILDI
+            db["Giderler"].insert_one({
+                "gider_id": f"MOB-{uuid.uuid4().hex[:8]}",
+                "tarih": datetime.now().strftime("%d/%m/%Y"), 
+                "plaka": st.session_state['plaka'], 
+                "tur": m_tip.upper(), 
+                "tutar": float(m_tutar), 
+                "sofor": st.session_state['user'], 
+                "kaynak": "MOBIL"
+            })
             st.success("İletildi!")
 
     if st.sidebar.button("🚪 ÇIKIŞ YAP"): st.session_state.update({'login': False}); st.rerun()
