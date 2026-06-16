@@ -104,13 +104,14 @@ else:
         lt = st.number_input("Litre", min_value=0.0, step=0.01)
         fiyat = st.number_input("Litre Fiyatı", min_value=0.0, step=0.01)
         if st.button("YAKIT KAYDET"):
-            # GİDER_ID EKLEMESİ YAPILDI
+            # LT ve GİDER_ID senkronize eklendi
             db["Giderler"].insert_one({
                 "gider_id": f"MOB-{uuid.uuid4().hex[:8]}", 
                 "tarih": datetime.now().strftime("%d/%m/%Y"), 
                 "plaka": st.session_state['plaka'], 
                 "tur": "YAKIT", 
                 "tutar": float(lt*fiyat), 
+                "lt": float(lt),
                 "sofor": st.session_state['user'], 
                 "kaynak": "MOBIL"
             })
@@ -120,13 +121,14 @@ else:
         m_tip = st.selectbox("Tür", ["Yemek", "Tamir", "Bakım", "Diğer"])
         m_tutar = st.number_input("Tutar", min_value=0.0)
         if st.button("MASRAFI KAYDET"):
-            # GİDER_ID EKLEMESİ YAPILDI
+            # LT 0.0 olarak eklendi (Senkronizasyon için)
             db["Giderler"].insert_one({
                 "gider_id": f"MOB-{uuid.uuid4().hex[:8]}",
                 "tarih": datetime.now().strftime("%d/%m/%Y"), 
                 "plaka": st.session_state['plaka'], 
                 "tur": m_tip.upper(), 
                 "tutar": float(m_tutar), 
+                "lt": 0.0,
                 "sofor": st.session_state['user'], 
                 "kaynak": "MOBIL"
             })
